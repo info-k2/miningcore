@@ -137,17 +137,48 @@ public static class VarDiffManager
     private static bool TryApplyNewDiff(ref double newDiff, double oldDiff, double minDiff, double maxDiff, double ts,
         VarDiffContext ctx, VarDiffConfig options, IMasterClock clock)
     {
-        // Max delta
+        // Max delta (for power-of-two quantization, treat as ratio multiplier)
         if(options.MaxDelta is > 0)
         {
-            var delta = Math.Abs(newDiff - oldDiff);
-
-            if(delta > options.MaxDelta)
+            // If maxDelta >= 1, treat it as a ratio multiplier (compatible with power-of-two steps)
+            // If maxDelta < 1, treat it as absolute difference (legacy behavior)
+            if(options.MaxDelta.Value >= 1.0)
             {
-                if(newDiff > oldDiff)
-                    newDiff -= delta - options.MaxDelta.Value;
-                else if(newDiff < oldDiff)
-                    newDiff += delta - options.MaxDelta.Value;
+                var ratio = newDiff / oldDiff;
+                var maxRatio = options.MaxDelta.Value;
+                var minRatio = 1.0 / maxRatio;
+
+                if(ratio > maxRatio)
+                {
+                    // Clamp to max ratio, then re-quantize to nearest power of two
+                    var clampedDiff = oldDiff * maxRatio;
+                    var power = Math.Round(Math.Log(clampedDiff, 2));
+                    newDiff = Math.Pow(2, power);
+                }
+                else if(ratio < minRatio)
+                {
+                    // Clamp to min ratio, then re-quantize to nearest power of two
+                    var clampedDiff = oldDiff * minRatio;
+                    var power = Math.Round(Math.Log(clampedDiff, 2));
+                    newDiff = Math.Pow(2, power);
+                }
+            }
+            else
+            {
+                // Legacy absolute difference mode (for backward compatibility)
+                var delta = Math.Abs(newDiff - oldDiff);
+
+                if(delta > options.MaxDelta)
+                {
+                    if(newDiff > oldDiff)
+                        newDiff -= delta - options.MaxDelta.Value;
+                    else if(newDiff < oldDiff)
+                        newDiff += delta - options.MaxDelta.Value;
+
+                    // Re-quantize after adjustment
+                    var power = Math.Round(Math.Log(newDiff, 2));
+                    newDiff = Math.Pow(2, power);
+                }
             }
         }
 
