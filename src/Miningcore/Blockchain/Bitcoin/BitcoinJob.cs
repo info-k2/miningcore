@@ -268,7 +268,7 @@ public class BitcoinJob
         return reward;
     }
 
-    protected bool RegisterSubmit(string extraNonce1, string extraNonce2, string nTime, string nonce, double difficulty)
+    protected bool RegisterSubmit(string extraNonce1, string extraNonce2, string nTime, string nonce, double difficulty, DateTime? varDiffLastUpdate)
     {
         var key = new StringBuilder()
             .Append(extraNonce1)
@@ -276,10 +276,18 @@ public class BitcoinJob
             .Append(nTime)
             .Append(nonce) // lowercase as we don't want to accept case-sensitive values as valid.
             .Append("|")
-            .Append(difficulty.ToString(CultureInfo.InvariantCulture))
-            .ToString();
+            .Append(difficulty.ToString(CultureInfo.InvariantCulture));
 
-        return submissions.TryAdd(key, true);
+        if(varDiffLastUpdate.HasValue)
+        {
+            key
+                .Append("|")
+                .Append(varDiffLastUpdate.Value.Ticks);
+        }
+
+        var keyString = key.ToString();
+
+        return submissions.TryAdd(keyString, true);
     }
 
     protected byte[] SerializeHeader(Span<byte> coinbaseHash, uint nTime, uint nonce, uint? versionMask, uint? versionBits)
@@ -696,9 +704,10 @@ public class BitcoinJob
                 throw new StratumException(StratumError.Other, "rolling-version mask violation");
         }
 
-        // dupe check (include current stratum difficulty in uniqueness key
-        // so that the same header at a different difficulty is not treated as a duplicate)
-        if(!RegisterSubmit(context.ExtraNonce1, extraNonce2, nTime, nonce, context.Difficulty))
+        // dupe check: include current stratum difficulty and VarDiff epoch (LastUpdate)
+        // in the uniqueness key so that the same header across different difficulty
+        // epochs is not treated as a duplicate.
+        if(!RegisterSubmit(context.ExtraNonce1, extraNonce2, nTime, nonce, context.Difficulty, context.VarDiff?.LastUpdate))
             throw new StratumException(StratumError.DuplicateShare, "duplicate share");
 
         return ProcessShareInternal(worker, extraNonce2, nTimeInt, nonceInt, versionBitsInt);
